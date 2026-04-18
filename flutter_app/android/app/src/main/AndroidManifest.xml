@@ -1,0 +1,95 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ── Network permissions ─────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+
+    <!-- ── Storage (for local file playback & downloads) ─────────────────── -->
+    <!-- Android 13+ uses granular media permissions instead -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" tools:ignore="ScopedStorage"/>
+    <!-- Android 13+ granular permissions -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+
+    <!-- ── Wake lock (keep screen on during video playback) ───────────────── -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
+    <!-- ── Sensors (gyroscope for auto-rotate) ────────────────────────────── -->
+    <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false"/>
+
+    <!-- ── Screen recording stub (PiP support) ───────────────────────────── -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+
+    <application
+        android:label="HUB 2.0"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:enableOnBackInvokedCallback="true"
+        android:hardwareAccelerated="true"
+
+        <!-- Cleartext HTTP for local dev only — REMOVE in production with HTTPS -->
+        android:usesCleartextTraffic="true"
+
+        tools:targetApi="34">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+
+            <!-- Allow all screen orientations — handled by Flutter/gyroscope -->
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize"
+
+            <!-- PiP support -->
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true">
+
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme"/>
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+
+            <!-- Deep link support for sharing video URLs -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="hub" android:host="video"/>
+                <data android:scheme="https" android:host="yourdomain.com"
+                    android:pathPrefix="/video"/>
+            </intent-filter>
+        </activity>
+
+        <!-- media_kit requires this for hardware video decoding -->
+        <meta-data android:name="android.media.browse.SERVICE" android:value=".MediaPlaybackService"/>
+
+        <!-- Don't deliver updates to UI if device is in the background -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2"/>
+    </application>
+
+    <!-- Required for targetSdkVersion 35+ -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+</manifest>

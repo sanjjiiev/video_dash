@@ -1,0 +1,267 @@
+# ==============================================================================
+# docker-compose.yml  (Phase 1 + Phase 2 — Local Development)
+#
+# Services:
+#   redis     : BullMQ message broker
+#   postgres  : Application database (users, videos, telemetry)
+#   minio     : S3-compatible object storage
+#   worker    : FFmpeg AES-128 HLS transcoding worker
+#   api       : Express API server
+#   nginx     : Reverse proxy + HLS CDN cache
+# ==============================================================================
+
+# version key removed — obsolete in Compose v2+
+
+networks:
+  hub_net:
+    driver: bridge
+
+volumes:
+  redis_data:
+  postgres_data:
+  minio_data:
+  nginx_cache:
+
+services:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Redis  (BullMQ message broker)
+  # ────────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: hub_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - hub_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # PostgreSQL  (Application database)
+  # ────────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: hub_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-hub}
+      POSTGRES_USER:     ${POSTGRES_USER:-hubuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Auto-run migrations on first boot (only runs if data volume is empty)
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    networks:
+      - hub_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hubuser} -d ${POSTGRES_DB:-hub}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # MinIO  (S3-compatible object storage)
+  # ────────────────────────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: hub_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"   # S3 API (used by worker + API on internal network)
+      - "9001:9001"   # MinIO Console UI
+    networks:
+      - hub_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # API (Express)
+  # ────────────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: hub_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      NODE_ENV:  development
+      LOG_LEVEL: info
+      PORT:      3000
+
+      # JWT secrets — CHANGE THESE IN PRODUCTION (use `openssl rand -hex 64`)
+      JWT_ACCESS_SECRET:  ${JWT_ACCESS_SECRET:-dev_access_secret_change_in_prod}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_refresh_secret_change_in_prod}
+      JWT_ACCESS_EXPIRES:  15m
+      JWT_REFRESH_EXPIRES: 7d
+
+      # Database
+      POSTGRES_HOST:     postgres
+      POSTGRES_PORT:     5432
+      POSTGRES_DB:       ${POSTGRES_DB:-hub}
+      POSTGRES_USER:     ${POSTGRES_USER:-hubuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+      # MinIO
+      MINIO_ENDPOINT:     minio
+      MINIO_PORT:         9000
+      MINIO_USE_SSL:      "false"
+      MINIO_ACCESS_KEY:   ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY:   ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET:       videos
+      MINIO_KEYS_BUCKET:  encryption-keys
+      MINIO_RAW_BUCKET:   raw-uploads
+
+      # Worker → API callback authentication
+      WORKER_SECRET: ${WORKER_SECRET:-dev_worker_secret_change_in_prod}
+
+      # Public URL for stream URL generation
+      PUBLIC_BASE_URL: http://localhost
+
+      # CORS
+      CORS_ORIGINS: http://localhost,http://localhost:3001
+
+      # Queue
+      QUEUE_NAME: transcode
+
+    # API does NOT expose its port directly — only Nginx does.
+    # Internal Docker network only.
+    networks:
+      - hub_net
+    healthcheck:
+      # Use 127.0.0.1 explicitly — Alpine resolves 'localhost' to ::1 (IPv6)
+      # but Node binds on 0.0.0.0 (IPv4 only) causing false connection refused.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+    security_opt:
+      - no-new-privileges:true
+
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # FFmpeg Transcoding Worker
+  # ────────────────────────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: hub_worker
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV:  development
+      LOG_LEVEL: info
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+      MINIO_ENDPOINT:    minio
+      MINIO_PORT:        9000
+      MINIO_USE_SSL:     "false"
+      MINIO_ACCESS_KEY:  ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY:  ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_REGION:      us-east-1
+      MINIO_BUCKET:      videos
+      MINIO_KEYS_BUCKET: encryption-keys
+      MINIO_RAW_BUCKET:  raw-uploads
+
+      # The key URI baked into .m3u8 playlists must point to the public API
+      KEY_SERVER_BASE_URL: http://localhost/api/v1/keys
+
+      # Callback to mark video as ready in DB after transcoding
+      API_BASE_URL:   http://api:3000
+      WORKER_SECRET:  ${WORKER_SECRET:-dev_worker_secret_change_in_prod}
+
+      QUEUE_NAME:          transcode
+      WORKER_CONCURRENCY:  1
+      SCRATCH_DIR:         /tmp/transcode
+
+    deploy:
+      resources:
+        limits:
+          cpus:   "2.0"
+          memory: 2G
+    ulimits:
+      nproc: 256
+      nofile:
+        soft: 65536
+        hard: 65536
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp/transcode:uid=1000,gid=1000,size=4g
+      - /tmp:uid=1000,gid=1000
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - hub_net
+
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Nginx  (Reverse proxy + HLS cache CDN)
+  # ────────────────────────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: hub_nginx
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx_cache:/var/cache/nginx/hls
+    ports:
+      - "80:80"      # HTTP  (development)
+      # - "443:443"  # HTTPS (enable in production with TLS certs)
+    networks:
+      - hub_net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
