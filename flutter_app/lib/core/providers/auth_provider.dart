@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../network/api_client.dart';
 import '../models/video_model.dart';
+import '../../features/analytics/screens/analytics_dashboard.dart';
 
 
 // ── Auth State ────────────────────────────────────────────────────────────────
@@ -288,8 +289,9 @@ final channelVideosProvider =
 
 // ── Analytics Timeseries Provider ─────────────────────────────────────────
 final analyticsOverviewProvider =
-    FutureProvider<Map<String, dynamic>>((ref) async {
-  return ref.watch(apiClientProvider).getAnalyticsOverview();
+    FutureProvider<AnalyticsOverview>((ref) async {
+  final d = await ref.watch(apiClientProvider).getAnalyticsOverview();
+  return AnalyticsOverview.fromJson(d);
 });
 
 final analyticsTimeseriesProvider =

@@ -210,7 +210,8 @@ class HubVideoPlayerState extends State<HubVideoPlayer>
   }
 
   void _seekTo(Duration pos) {
-    _player.seek(pos.clamp(Duration.zero, _duration));
+    final clampedMs = pos.inMilliseconds.clamp(0, _duration.inMilliseconds);
+    _player.seek(Duration(milliseconds: clampedMs));
   }
 
   void _skipForward()  => _seekTo(_position + const Duration(seconds: 10));

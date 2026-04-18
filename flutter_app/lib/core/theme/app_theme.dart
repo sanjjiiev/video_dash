@@ -73,7 +73,7 @@ abstract class AppTheme {
       type: BottomNavigationBarType.fixed,
     ),
 
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color:     AppColors.darkCard,
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -169,7 +169,7 @@ abstract class AppTheme {
       linearTrackColor: AppColors.darkDivider,
     ),
 
-    dialogTheme: DialogTheme(
+    dialogTheme: DialogThemeData(
       backgroundColor: AppColors.darkCard,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),

@@ -302,7 +302,7 @@ class _AnalyticsDashboardState extends ConsumerState<AnalyticsDashboard>
                     'completion': e.value.avgCompletionPct,
                   },
                   metric: _selectedMetric,
-                )).animate(interval: 60.ms).fadeIn().slideX(begin: 0.1),
+                )).toList().animate(interval: 60.ms).fadeIn().slideX(begin: 0.1),
               ],
             ),
     );
@@ -329,7 +329,7 @@ class _AnalyticsDashboardState extends ConsumerState<AnalyticsDashboard>
         rank: e.key + 1,
         data: e.value,
         metric: _selectedMetric,
-      )).animate(interval: 60.ms).fadeIn().slideX(begin: 0.1),
+      )).toList().animate(interval: 60.ms).fadeIn().slideX(begin: 0.1),
     ],
   );
 
