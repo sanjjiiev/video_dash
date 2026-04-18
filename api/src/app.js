@@ -62,7 +62,7 @@ app.use(helmet({
 app.use(cors({
   origin: (origin, cb) => {
     // Allow requests with no origin (mobile apps, curl, Postman)
-    if (!origin || config.server.corsOrigins.includes(origin)) return cb(null, true);
+    if (!origin || config.server.corsOrigins.includes(origin) || origin.startsWith('http://localhost:')) return cb(null, true);
     cb(new Error(`CORS: origin ${origin} is not allowed`));
   },
   credentials: true,    // Required for httpOnly cookies to be sent cross-origin
